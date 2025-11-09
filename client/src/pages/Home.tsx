@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { Link } from "wouter";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { trpc } from "@/lib/trpc";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -107,6 +108,9 @@ export default function Home() {
     return unique.slice(0, 5); // 最大5キーワード
   };
 
+  // キーワード保存のmutation
+  const saveKeywordsMutation = trpc.keywords.save.useMutation();
+
   // キーワード抽出を実行
   const handleAnalyze = () => {
     if (!researchTheme.trim()) return;
@@ -116,6 +120,11 @@ export default function Home() {
       const keywords = extractKeywords(researchTheme);
       setExtractedKeywords(keywords);
       setIsAnalyzing(false);
+      
+      // ログイン済みの場合のみキーワードを保存
+      if (isAuthenticated && keywords.length > 0) {
+        saveKeywordsMutation.mutate({ keywords });
+      }
     }, 500);
   };
 

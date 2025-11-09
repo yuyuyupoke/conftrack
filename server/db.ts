@@ -90,3 +90,54 @@ export async function getUserByOpenId(openId: string) {
 }
 
 // TODO: add feature queries here as your schema grows.
+
+// User keywords queries
+
+export async function saveUserKeywords(userId: number, keywords: string[]): Promise<void> {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot save user keywords: database not available");
+    return;
+  }
+
+  try {
+    const { userKeywords } = await import("../drizzle/schema");
+    
+    // 各キーワードを個別に保存
+    for (const keyword of keywords) {
+      await db.insert(userKeywords).values({
+        userId,
+        keyword: keyword.trim(),
+        searchedAt: new Date(),
+      });
+    }
+  } catch (error) {
+    console.error("[Database] Failed to save user keywords:", error);
+    throw error;
+  }
+}
+
+export async function getUserKeywords(userId: number, limit: number = 50) {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot get user keywords: database not available");
+    return [];
+  }
+
+  try {
+    const { userKeywords } = await import("../drizzle/schema");
+    const { desc } = await import("drizzle-orm");
+    
+    const result = await db
+      .select()
+      .from(userKeywords)
+      .where(eq(userKeywords.userId, userId))
+      .orderBy(desc(userKeywords.searchedAt))
+      .limit(limit);
+
+    return result;
+  } catch (error) {
+    console.error("[Database] Failed to get user keywords:", error);
+    return [];
+  }
+}

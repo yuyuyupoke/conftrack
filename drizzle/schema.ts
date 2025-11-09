@@ -82,3 +82,17 @@ export const userFavorites = mysqlTable("userFavorites", {
 
 export type UserFavorite = typeof userFavorites.$inferSelect;
 export type InsertUserFavorite = typeof userFavorites.$inferInsert;
+
+/**
+ * User keywords table - ユーザーの検索キーワード履歴
+ * ユーザーが入力したキーワードを保存し、将来的にパーソナライズされたレコメンドに活用
+ */
+export const userKeywords = mysqlTable("userKeywords", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  keyword: varchar("keyword", { length: 255 }).notNull(),
+  searchedAt: timestamp("searchedAt").defaultNow().notNull(),
+});
+
+export type UserKeyword = typeof userKeywords.$inferSelect;
+export type InsertUserKeyword = typeof userKeywords.$inferInsert;
