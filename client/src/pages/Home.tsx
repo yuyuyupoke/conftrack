@@ -1,9 +1,10 @@
 import { useEffect, useState, useMemo } from "react";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { Search, Building2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Search, Building2, TrendingUp, Sparkles } from "lucide-react";
 
 interface PresentationData {
   学会タイトル: string;
@@ -12,16 +13,21 @@ interface PresentationData {
   発表者の所属: string;
 }
 
-interface CompanyCount {
+interface CompanyRanking {
   company: string;
-  count: number;
+  matchScore: number;
+  presentationCount: number;
+  matchedKeywords: string[];
 }
 
 export default function Home() {
+  const { user, loading: authLoading, error, isAuthenticated, logout } = useAuth();
+
   const [data, setData] = useState<PresentationData[]>([]);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [selectedCompanies, setSelectedCompanies] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(true);
+  const [researchTheme, setResearchTheme] = useState("");
+  const [extractedKeywords, setExtractedKeywords] = useState<string[]>([]);
+  const [dataLoading, setDataLoading] = useState(true);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   // CSVデータを読み込む
   useEffect(() => {
@@ -33,7 +39,6 @@ export default function Home() {
         const parsedData: PresentationData[] = [];
         for (let i = 1; i < lines.length; i++) {
           if (lines[i].trim()) {
-            // CSVパーサー: カンマを含むフィールドを正しく処理
             const values: string[] = [];
             let current = '';
             let inQuotes = false;
@@ -64,82 +69,96 @@ export default function Home() {
         }
         
         setData(parsedData);
-        setLoading(false);
+        setDataLoading(false);
       })
       .catch(error => {
         console.error('Error loading CSV:', error);
-        setLoading(false);
+        setDataLoading(false);
       });
   }, []);
 
-  // 企業リストを抽出（所属から企業名を抽出）
-  const companies = useMemo(() => {
-    const companySet = new Set<string>();
-    data.forEach(item => {
-      const affiliation = item.発表者の所属;
-      if (affiliation) {
-        companySet.add(affiliation);
-      }
-    });
-    return Array.from(companySet).sort();
-  }, [data]);
-
-  // 検索フィルター
-  const filteredCompanies = useMemo(() => {
-    if (!searchTerm) return companies;
-    return companies.filter(company => 
-      company.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-  }, [companies, searchTerm]);
-
-  // 選択された企業の学会発表データを集計
-  const chartData = useMemo(() => {
-    if (selectedCompanies.size === 0) return [];
-
-    const conferenceCount = new Map<string, number>();
+  // 改善されたキーワード抽出（助詞・助動詞で分割）
+  const extractKeywords = (text: string): string[] => {
+    // 助詞・助動詞・接続詞のパターン
+    const particlePatterns = [
+      'を用いた', 'に基づく', 'における', 'について', 'による',
+      'を', 'に', 'が', 'の', 'は', 'と', 'で', 'や', 'へ', 'から', 'まで', 'より',
+      'など', 'などの', 'および', 'または', 'あるいは'
+    ];
     
+    // 正規表現で助詞・助動詞を区切り文字に変換
+    let processed = text;
+    particlePatterns.forEach(pattern => {
+      processed = processed.replace(new RegExp(pattern, 'g'), '|');
+    });
+    
+    // 区切り文字で分割
+    const words = processed.split(/[|\s、。,・・・]+/)
+      .map(w => w.trim())
+      .filter(w => w.length > 0);
+    
+    // 2文字以上のキーワードのみ
+    const filtered = words.filter(word => word.length >= 2);
+    
+    // 重複を除去
+    const unique = Array.from(new Set(filtered));
+    
+    return unique.slice(0, 5); // 最大5キーワード
+  };
+
+  // キーワード抽出を実行
+  const handleAnalyze = () => {
+    if (!researchTheme.trim()) return;
+    
+    setIsAnalyzing(true);
+    setTimeout(() => {
+      const keywords = extractKeywords(researchTheme);
+      setExtractedKeywords(keywords);
+      setIsAnalyzing(false);
+    }, 500);
+  };
+
+  // 類似度スコアリング（簡易版）
+  const companyRankings = useMemo((): CompanyRanking[] => {
+    if (extractedKeywords.length === 0) return [];
+
+    const companyMap = new Map<string, { count: number; matchedKeywords: Set<string> }>();
+
     data.forEach(item => {
-      if (selectedCompanies.has(item.発表者の所属)) {
-        const conference = item.学会タイトル;
-        conferenceCount.set(conference, (conferenceCount.get(conference) || 0) + 1);
+      const company = item.発表者の所属;
+      const title = item.発表タイトル.toLowerCase();
+      
+      const matchedKeywords = extractedKeywords.filter(keyword => 
+        title.includes(keyword.toLowerCase())
+      );
+
+      if (matchedKeywords.length > 0) {
+        if (!companyMap.has(company)) {
+          companyMap.set(company, { count: 0, matchedKeywords: new Set() });
+        }
+        const companyData = companyMap.get(company)!;
+        companyData.count++;
+        matchedKeywords.forEach(kw => companyData.matchedKeywords.add(kw));
       }
     });
 
-    return Array.from(conferenceCount.entries())
-      .map(([conference, count]) => ({
-        学会名: conference,
-        発表数: count
-      }))
-      .sort((a, b) => b.発表数 - a.発表数);
-  }, [data, selectedCompanies]);
+    const rankings: CompanyRanking[] = Array.from(companyMap.entries()).map(([company, data]) => {
+      // スコア計算: (マッチしたキーワード数 / 総キーワード数) * 100 + (発表数 * 2)
+      const keywordMatchRatio = data.matchedKeywords.size / extractedKeywords.length;
+      const matchScore = Math.round(keywordMatchRatio * 70 + Math.min(data.count * 2, 30));
+      
+      return {
+        company,
+        matchScore,
+        presentationCount: data.count,
+        matchedKeywords: Array.from(data.matchedKeywords)
+      };
+    });
 
-  // 企業選択のトグル
-  const toggleCompany = (company: string) => {
-    const newSelected = new Set(selectedCompanies);
-    if (newSelected.has(company)) {
-      newSelected.delete(company);
-    } else {
-      newSelected.add(company);
-    }
-    setSelectedCompanies(newSelected);
-  };
+    return rankings.sort((a, b) => b.matchScore - a.matchScore);
+  }, [data, extractedKeywords]);
 
-  // 全選択/全解除
-  const toggleAllFiltered = () => {
-    if (filteredCompanies.every(c => selectedCompanies.has(c))) {
-      // 全て選択されている場合は解除
-      const newSelected = new Set(selectedCompanies);
-      filteredCompanies.forEach(c => newSelected.delete(c));
-      setSelectedCompanies(newSelected);
-    } else {
-      // 一部または全て未選択の場合は全選択
-      const newSelected = new Set(selectedCompanies);
-      filteredCompanies.forEach(c => newSelected.add(c));
-      setSelectedCompanies(newSelected);
-    }
-  };
-
-  if (loading) {
+  if (dataLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center">
@@ -155,129 +174,158 @@ export default function Home() {
       {/* ヘッダー */}
       <header className="border-b bg-card">
         <div className="container py-4">
-          <div className="flex items-center gap-3">
-            <Building2 className="h-8 w-8 text-primary" />
-            <div>
-              <h1 className="text-2xl font-bold text-foreground">企業学会発表トラッカー</h1>
-              <p className="text-sm text-muted-foreground">博士就活生のための学会発表分析ツール</p>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Building2 className="h-8 w-8 text-primary" />
+              <div>
+                <h1 className="text-2xl font-bold text-foreground">ConferenceTracker</h1>
+                <p className="text-sm text-muted-foreground">博士就活生のための企業研究マッチングツール</p>
+              </div>
             </div>
           </div>
         </div>
       </header>
 
       {/* メインコンテンツ */}
-      <div className="container py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* 左側: 企業選択パネル */}
-          <div className="lg:col-span-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">企業選択</CardTitle>
-                <div className="relative mt-2">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    type="text"
-                    placeholder="企業名で検索..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
-                <div className="flex items-center justify-between mt-3 text-sm">
-                  <span className="text-muted-foreground">
-                    {filteredCompanies.length}件の企業
-                  </span>
-                  <button
-                    onClick={toggleAllFiltered}
-                    className="text-primary hover:underline"
-                  >
-                    {filteredCompanies.every(c => selectedCompanies.has(c)) ? '全解除' : '全選択'}
-                  </button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2 max-h-[400px] lg:max-h-[600px] overflow-y-auto">
-                  {filteredCompanies.map((company) => (
-                    <div
-                      key={company}
-                      className="flex items-start gap-3 p-2 rounded-md hover:bg-accent cursor-pointer transition-colors"
-                      onClick={() => toggleCompany(company)}
-                    >
-                      <Checkbox
-                        checked={selectedCompanies.has(company)}
-                        onCheckedChange={() => toggleCompany(company)}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                      <label className="text-sm cursor-pointer flex-1 leading-relaxed">
-                        {company}
-                      </label>
-                    </div>
+      <div className="container py-8">
+        {/* 研究テーマ入力エリア */}
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-primary" />
+              あなたの研究テーマを入力してください
+            </CardTitle>
+            <CardDescription>
+              研究テーマを入力すると、類似した研究を行っている企業をマッチ度順に表示します
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <Input
+                  type="text"
+                  placeholder="例: 生体情報を用いた機械学習"
+                  value={researchTheme}
+                  onChange={(e) => setResearchTheme(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAnalyze()}
+                  className="text-base"
+                />
+              </div>
+              <Button 
+                onClick={handleAnalyze}
+                disabled={!researchTheme.trim() || isAnalyzing}
+                className="px-6"
+              >
+                {isAnalyzing ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    分析中...
+                  </>
+                ) : (
+                  <>
+                    <Search className="h-4 w-4 mr-2" />
+                    企業を検索
+                  </>
+                )}
+              </Button>
+            </div>
+
+            {/* 抽出されたキーワード */}
+            {extractedKeywords.length > 0 && (
+              <div className="mt-4">
+                <p className="text-sm text-muted-foreground mb-2">抽出されたキーワード:</p>
+                <div className="flex flex-wrap gap-2">
+                  {extractedKeywords.map((keyword, index) => (
+                    <Badge key={index} variant="secondary" className="text-sm">
+                      {keyword}
+                    </Badge>
                   ))}
                 </div>
-              </CardContent>
-            </Card>
-          </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
-          {/* 右側: ヒストグラム */}
-          <div className="lg:col-span-8">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">学会発表分布</CardTitle>
-                <p className="text-sm text-muted-foreground">
-                  {selectedCompanies.size > 0 
-                    ? `${selectedCompanies.size}社を選択中` 
-                    : '企業を選択してください'}
-                </p>
-              </CardHeader>
-              <CardContent>
-                {chartData.length > 0 ? (
-                  <div className="w-full h-[400px] lg:h-[500px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart
-                        data={chartData}
-                        margin={{ top: 20, right: 10, left: 10, bottom: 100 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                        <XAxis 
-                          dataKey="学会名" 
-                          angle={-45}
-                          textAnchor="end"
-                          height={120}
-                          interval={0}
-                          tick={{ fontSize: 11 }}
-                        />
-                        <YAxis 
-                          label={{ value: '発表数', angle: -90, position: 'insideLeft' }}
-                          tick={{ fontSize: 11 }}
-                        />
-                        <Tooltip 
-                          contentStyle={{ 
-                            backgroundColor: 'hsl(var(--card))', 
-                            border: '1px solid hsl(var(--border))',
-                            borderRadius: '8px'
-                          }}
-                        />
-                        <Legend />
-                        <Bar 
-                          dataKey="発表数" 
-                          fill="hsl(var(--primary))" 
-                          radius={[4, 4, 0, 0]}
-                        />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                ) : (
-                  <div className="h-[400px] lg:h-[500px] flex items-center justify-center text-muted-foreground">
-                    <div className="text-center px-4">
-                      <Building2 className="h-16 w-16 mx-auto mb-4 opacity-20" />
-                      <p className="text-sm lg:text-base">企業を選択すると、学会発表の分布が表示されます</p>
+        {/* 企業ランキング表示エリア */}
+        {companyRankings.length > 0 ? (
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
+                <TrendingUp className="h-5 w-5 text-primary" />
+                マッチ度ランキング
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                {companyRankings.length}社が見つかりました
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4">
+              {companyRankings.map((ranking, index) => (
+                <Card key={ranking.company} className="hover:shadow-md transition-shadow">
+                  <CardContent className="pt-6">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <Badge variant="outline" className="text-lg font-bold px-3 py-1">
+                            #{index + 1}
+                          </Badge>
+                          <h3 className="text-lg font-semibold text-foreground">
+                            {ranking.company}
+                          </h3>
+                        </div>
+                        
+                        <div className="flex flex-wrap gap-2 mt-3">
+                          <Badge variant="default" className="text-sm">
+                            マッチ度: {ranking.matchScore}%
+                          </Badge>
+                          <Badge variant="secondary" className="text-sm">
+                            発表数: {ranking.presentationCount}件
+                          </Badge>
+                        </div>
+
+                        <div className="mt-3">
+                          <p className="text-sm text-muted-foreground mb-1">マッチしたキーワード:</p>
+                          <div className="flex flex-wrap gap-1">
+                            {ranking.matchedKeywords.map((keyword, idx) => (
+                              <Badge key={idx} variant="outline" className="text-xs">
+                                {keyword}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="ml-4">
+                        <Button variant="outline" size="sm">
+                          詳細を見る
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
           </div>
-        </div>
+        ) : extractedKeywords.length > 0 ? (
+          <Card>
+            <CardContent className="py-12 text-center">
+              <Building2 className="h-16 w-16 mx-auto mb-4 opacity-20" />
+              <p className="text-muted-foreground">
+                マッチする企業が見つかりませんでした。<br />
+                別のキーワードで検索してみてください。
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <CardContent className="py-12 text-center">
+              <Sparkles className="h-16 w-16 mx-auto mb-4 opacity-20" />
+              <p className="text-muted-foreground">
+                研究テーマを入力して、あなたにマッチする企業を見つけましょう
+              </p>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   );
