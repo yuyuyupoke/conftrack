@@ -194,10 +194,10 @@ export default function Home() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-primary" />
-              あなたの研究テーマを入力してください
+              あなたの研究キーワードを入力してください
             </CardTitle>
             <CardDescription>
-              研究テーマを入力すると、類似した研究を行っている企業をマッチ度順に表示します
+              研究キーワードを入力すると、類似した研究を行っている企業をマッチ度順に表示します
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -205,7 +205,7 @@ export default function Home() {
               <div className="flex-1">
                 <Input
                   type="text"
-                  placeholder="例: 生体情報を用いた機械学習"
+                  placeholder="例：生体情報、機械学習"
                   value={researchTheme}
                   onChange={(e) => setResearchTheme(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleAnalyze()}
