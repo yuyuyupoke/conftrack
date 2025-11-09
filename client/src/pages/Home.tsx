@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
+import { Link } from "wouter";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -296,9 +297,11 @@ export default function Home() {
                       </div>
 
                       <div className="ml-4">
-                        <Button variant="outline" size="sm">
-                          詳細を見る
-                        </Button>
+                        <Link href={`/company/${encodeURIComponent(ranking.company)}`}>
+                          <Button variant="outline" size="sm">
+                            詳細を見る
+                          </Button>
+                        </Link>
                       </div>
                     </div>
                   </CardContent>
