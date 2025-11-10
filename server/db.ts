@@ -201,6 +201,36 @@ export async function insertPresentation(
   }
 }
 
+export async function getAllPresentationsWithDetails() {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot get presentations: database not available");
+    return [];
+  }
+
+  try {
+    const { presentations, conferences, organizations } = await import("../drizzle/schema");
+    
+    const result = await db
+      .select({
+        conferenceId: presentations.conferenceId,
+        conferenceName: conferences.name,
+        presentationTitle: presentations.title,
+        authorName: presentations.authorName,
+        organizationId: presentations.organizationId,
+        organizationName: organizations.name,
+      })
+      .from(presentations)
+      .leftJoin(conferences, eq(presentations.conferenceId, conferences.id))
+      .leftJoin(organizations, eq(presentations.organizationId, organizations.id));
+
+    return result;
+  } catch (error) {
+    console.error("[Database] Failed to get presentations:", error);
+    return [];
+  }
+}
+
 // User keywords queries
 
 export async function saveUserKeywords(userId: number, keywords: string[]): Promise<void> {
