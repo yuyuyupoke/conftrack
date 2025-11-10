@@ -28,56 +28,23 @@ export default function Home() {
   const [data, setData] = useState<PresentationData[]>([]);
   const [researchTheme, setResearchTheme] = useState("");
   const [extractedKeywords, setExtractedKeywords] = useState<string[]>([]);
-  const [dataLoading, setDataLoading] = useState(true);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  // CSVデータを読み込む
+  // データベースから発表データを取得
+  const { data: presentationsData, isLoading: dataLoading } = trpc.presentations.getAll.useQuery();
+
+  // データベースから取得したデータを変換
   useEffect(() => {
-    fetch('/data.csv')
-      .then(response => response.text())
-      .then(csvText => {
-        const lines = csvText.split('\n');
-        
-        const parsedData: PresentationData[] = [];
-        for (let i = 1; i < lines.length; i++) {
-          if (lines[i].trim()) {
-            const values: string[] = [];
-            let current = '';
-            let inQuotes = false;
-            
-            for (let j = 0; j < lines[i].length; j++) {
-              const char = lines[i][j];
-              
-              if (char === '"') {
-                inQuotes = !inQuotes;
-              } else if (char === ',' && !inQuotes) {
-                values.push(current);
-                current = '';
-              } else {
-                current += char;
-              }
-            }
-            values.push(current);
-            
-            if (values.length >= 4) {
-              parsedData.push({
-                学会タイトル: values[0].trim(),
-                発表タイトル: values[1].trim(),
-                発表者: values[2].trim(),
-                発表者の所属: values[3].trim()
-              });
-            }
-          }
-        }
-        
-        setData(parsedData);
-        setDataLoading(false);
-      })
-      .catch(error => {
-        console.error('Error loading CSV:', error);
-        setDataLoading(false);
-      });
-  }, []);
+    if (presentationsData) {
+      const transformedData: PresentationData[] = presentationsData.map(item => ({
+        学会タイトル: item.conferenceName || "",
+        発表タイトル: item.presentationTitle || "",
+        発表者: item.authorName || "",
+        発表者の所属: item.organizationName || ""
+      }));
+      setData(transformedData);
+    }
+  }, [presentationsData]);
 
   // 改善されたキーワード抽出（助詞・助動詞で分割）
   const extractKeywords = (text: string): string[] => {
@@ -136,10 +103,12 @@ export default function Home() {
 
     data.forEach(item => {
       const company = item.発表者の所属;
-      const title = item.発表タイトル.toLowerCase();
+      if (!company) return; // 所属が空の場合はスキップ
+      
+      const title = item.発表タイトル;
       
       const matchedKeywords = extractedKeywords.filter(keyword => 
-        title.includes(keyword.toLowerCase())
+        title.includes(keyword)
       );
 
       if (matchedKeywords.length > 0) {

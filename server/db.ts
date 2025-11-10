@@ -91,6 +91,146 @@ export async function getUserByOpenId(openId: string) {
 
 // TODO: add feature queries here as your schema grows.
 
+// Conference data management
+
+export async function insertConference(name: string, url?: string) {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot insert conference: database not available");
+    return null;
+  }
+
+  try {
+    const { conferences } = await import("../drizzle/schema");
+    const result = await db.insert(conferences).values({
+      name,
+      url: url || null,
+    });
+    return result;
+  } catch (error) {
+    console.error("[Database] Failed to insert conference:", error);
+    throw error;
+  }
+}
+
+export async function getConferenceByName(name: string) {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot get conference: database not available");
+    return null;
+  }
+
+  try {
+    const { conferences } = await import("../drizzle/schema");
+    const result = await db.select().from(conferences).where(eq(conferences.name, name)).limit(1);
+    return result.length > 0 ? result[0] : null;
+  } catch (error) {
+    console.error("[Database] Failed to get conference:", error);
+    return null;
+  }
+}
+
+export async function insertOrganization(name: string) {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot insert organization: database not available");
+    return null;
+  }
+
+  try {
+    const { organizations } = await import("../drizzle/schema");
+    
+    // Check if organization already exists
+    const existing = await db.select().from(organizations).where(eq(organizations.name, name)).limit(1);
+    if (existing.length > 0) {
+      return existing[0];
+    }
+
+    const result = await db.insert(organizations).values({ name });
+    const inserted = await db.select().from(organizations).where(eq(organizations.name, name)).limit(1);
+    return inserted.length > 0 ? inserted[0] : null;
+  } catch (error) {
+    console.error("[Database] Failed to insert organization:", error);
+    throw error;
+  }
+}
+
+export async function getOrganizationByName(name: string) {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot get organization: database not available");
+    return null;
+  }
+
+  try {
+    const { organizations } = await import("../drizzle/schema");
+    const result = await db.select().from(organizations).where(eq(organizations.name, name)).limit(1);
+    return result.length > 0 ? result[0] : null;
+  } catch (error) {
+    console.error("[Database] Failed to get organization:", error);
+    return null;
+  }
+}
+
+export async function insertPresentation(
+  conferenceId: number,
+  organizationId: number,
+  title: string,
+  authorName?: string,
+  keywords?: string[]
+) {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot insert presentation: database not available");
+    return null;
+  }
+
+  try {
+    const { presentations } = await import("../drizzle/schema");
+    const result = await db.insert(presentations).values({
+      conferenceId,
+      organizationId,
+      title,
+      authorName: authorName || null,
+      keywords: keywords ? JSON.stringify(keywords) : null,
+    });
+    return result;
+  } catch (error) {
+    console.error("[Database] Failed to insert presentation:", error);
+    throw error;
+  }
+}
+
+export async function getAllPresentationsWithDetails() {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot get presentations: database not available");
+    return [];
+  }
+
+  try {
+    const { presentations, conferences, organizations } = await import("../drizzle/schema");
+    
+    const result = await db
+      .select({
+        conferenceId: presentations.conferenceId,
+        conferenceName: conferences.name,
+        presentationTitle: presentations.title,
+        authorName: presentations.authorName,
+        organizationId: presentations.organizationId,
+        organizationName: organizations.name,
+      })
+      .from(presentations)
+      .leftJoin(conferences, eq(presentations.conferenceId, conferences.id))
+      .leftJoin(organizations, eq(presentations.organizationId, organizations.id));
+
+    return result;
+  } catch (error) {
+    console.error("[Database] Failed to get presentations:", error);
+    return [];
+  }
+}
+
 // User keywords queries
 
 export async function saveUserKeywords(userId: number, keywords: string[]): Promise<void> {

@@ -3,7 +3,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router, protectedProcedure } from "./_core/trpc";
 import { z } from "zod";
-import { saveUserKeywords, getUserKeywords } from "./db";
+import { saveUserKeywords, getUserKeywords, getAllPresentationsWithDetails } from "./db";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -37,6 +37,15 @@ export const appRouter = router({
       .query(async ({ ctx, input }) => {
         const keywords = await getUserKeywords(ctx.user.id, input.limit);
         return keywords;
+      }),
+  }),
+
+  // Presentations router
+  presentations: router({
+    getAll: publicProcedure
+      .query(async () => {
+        const presentations = await getAllPresentationsWithDetails();
+        return presentations;
       }),
   }),
 });
