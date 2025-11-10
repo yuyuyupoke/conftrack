@@ -105,10 +105,10 @@ export default function Home() {
       const company = item.発表者の所属;
       if (!company) return; // 所属が空の場合はスキップ
       
-      const title = item.発表タイトル.toLowerCase();
+      const title = item.発表タイトル;
       
       const matchedKeywords = extractedKeywords.filter(keyword => 
-        title.includes(keyword.toLowerCase())
+        title.includes(keyword)
       );
 
       if (matchedKeywords.length > 0) {
