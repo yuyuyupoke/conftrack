@@ -95,11 +95,14 @@ export default function Home() {
     }, 500);
   };
 
-  // 類似度スコアリング（簡易版）
+  // マッチ度スコアリング（簡易版）
   const companyRankings = useMemo((): CompanyRanking[] => {
     if (extractedKeywords.length === 0) return [];
 
-    const companyMap = new Map<string, { count: number; matchedKeywords: Set<string> }>();
+    const companyMap = new Map<
+      string,
+      { matchedPresentations: number; totalPresentations: number; matchedKeywords: Set<string> }
+    >();
 
     data.forEach(item => {
       const company = item.発表者の所属;
@@ -107,29 +110,37 @@ export default function Home() {
       
       const title = item.発表タイトル;
       
-      const matchedKeywords = extractedKeywords.filter(keyword => 
+      const matchedKeywords = extractedKeywords.filter(keyword =>
         title.includes(keyword)
       );
+      const hasMatch = matchedKeywords.length > 0;
 
-      if (matchedKeywords.length > 0) {
-        if (!companyMap.has(company)) {
-          companyMap.set(company, { count: 0, matchedKeywords: new Set() });
-        }
-        const companyData = companyMap.get(company)!;
-        companyData.count++;
+      if (!companyMap.has(company)) {
+        companyMap.set(company, {
+          matchedPresentations: 0,
+          totalPresentations: 0,
+          matchedKeywords: new Set(),
+        });
+      }
+
+      const companyData = companyMap.get(company)!;
+      companyData.totalPresentations += 1;
+
+      if (hasMatch) {
+        companyData.matchedPresentations += 1;
         matchedKeywords.forEach(kw => companyData.matchedKeywords.add(kw));
       }
     });
 
     const rankings: CompanyRanking[] = Array.from(companyMap.entries()).map(([company, data]) => {
-      // スコア計算: (マッチしたキーワード数 / 総キーワード数) * 100
-      const keywordMatchRatio = data.matchedKeywords.size / extractedKeywords.length;
-      const matchScore = Math.round(keywordMatchRatio * 100);
+      // スコア計算: (条件に当てはまる発表数 / 総発表数) * 100
+      const ratio = data.totalPresentations === 0 ? 0 : data.matchedPresentations / data.totalPresentations;
+      const matchScore = Math.round(ratio * 100);
       
       return {
         company,
         matchScore,
-        presentationCount: data.count,
+        presentationCount: data.matchedPresentations,
         matchedKeywords: Array.from(data.matchedKeywords)
       };
     });
