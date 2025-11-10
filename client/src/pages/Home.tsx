@@ -122,9 +122,9 @@ export default function Home() {
     });
 
     const rankings: CompanyRanking[] = Array.from(companyMap.entries()).map(([company, data]) => {
-      // スコア計算: (マッチしたキーワード数 / 総キーワード数) * 100 + (発表数 * 2)
+      // スコア計算: (マッチしたキーワード数 / 総キーワード数) * 100
       const keywordMatchRatio = data.matchedKeywords.size / extractedKeywords.length;
-      const matchScore = Math.round(keywordMatchRatio * 70 + Math.min(data.count * 2, 30));
+      const matchScore = Math.round(keywordMatchRatio * 100);
       
       return {
         company,
