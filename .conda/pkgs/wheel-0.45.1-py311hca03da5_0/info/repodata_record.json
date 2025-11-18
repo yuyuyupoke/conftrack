@@ -1,0 +1,23 @@
+{
+  "arch": "arm64",
+  "build": "py311hca03da5_0",
+  "build_number": 0,
+  "channel": "https://repo.anaconda.com/pkgs/main/osx-arm64",
+  "constrains": [],
+  "depends": [
+    "python >=3.11,<3.12.0a0"
+  ],
+  "fn": "wheel-0.45.1-py311hca03da5_0.conda",
+  "legacy_bz2_md5": "9ab5e101cd19fdec87c3e527ea1d181c",
+  "license": "MIT",
+  "license_family": "MIT",
+  "md5": "4470de7e3f40c084457285b0c6c4f2de",
+  "name": "wheel",
+  "platform": "darwin",
+  "sha256": "42460d3e1974b1008ca94af2076a9220b01bd90e9a26f430316f0d90eedcb457",
+  "size": 156109,
+  "subdir": "osx-arm64",
+  "timestamp": 1737990528158,
+  "url": "https://repo.anaconda.com/pkgs/main/osx-arm64/wheel-0.45.1-py311hca03da5_0.conda",
+  "version": "0.45.1"
+}

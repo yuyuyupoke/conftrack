@@ -1,0 +1,21 @@
+{
+  "arch": "arm64",
+  "build": "hca03da5_1",
+  "build_number": 1,
+  "channel": "https://repo.anaconda.com/pkgs/main/osx-arm64",
+  "constrains": [],
+  "depends": [],
+  "fn": "libffi-3.4.4-hca03da5_1.conda",
+  "legacy_bz2_md5": "f31e4eb9cd6447cc2f5ef0243a76540c",
+  "license": "MIT",
+  "license_family": "MIT",
+  "md5": "2bec9ee4b1214a3c3e2d1f2e18725daf",
+  "name": "libffi",
+  "platform": "darwin",
+  "sha256": "800216cb554d0beaf970fe7c3efeee7974bb76576c1c5e0ae070c57fca2bba93",
+  "size": 122887,
+  "subdir": "osx-arm64",
+  "timestamp": 1714483461787,
+  "url": "https://repo.anaconda.com/pkgs/main/osx-arm64/libffi-3.4.4-hca03da5_1.conda",
+  "version": "3.4.4"
+}
