@@ -1,257 +1,345 @@
-from __future__ import annotations
 
 import os
-import re
-from io import BytesIO
-from pathlib import Path
-from typing import List, Optional
-
-import pandas as pd
 import streamlit as st
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from janome.tokenizer import Tokenizer
+from wordcloud import WordCloud
+import matplotlib.pyplot as plt
 
-BASE_DIR = Path(__file__).resolve().parent
-LOCAL_CSV_PATH = BASE_DIR / "presentations.csv"
+# --- Page Config ---
+st.set_page_config(
+    page_title="ConfTrack",
+    page_icon="🎓",
+    layout="wide"
+)
 
-# Environment-driven GCS settings (optional)
-USE_GCS = os.getenv("USE_GCS", "0") == "1"
-GCS_BUCKET = os.getenv("GCS_BUCKET")
-GCS_BLOB = os.getenv("GCS_BLOB", "presentations.csv")
-
-
-def normalize_keywords(raw_text: str) -> List[str]:
-    if not raw_text:
-        return []
-    tokens = re.split(r"[,\s、。・/／;；]+", raw_text)
-    cleaned: List[str] = []
-    for token in tokens:
-        word = token.strip()
-        if len(word) < 2:
-            continue
-        if word not in cleaned:
-            cleaned.append(word)
-    return cleaned
-
-
-def annotate_matches(df: pd.DataFrame, keywords: List[str]) -> pd.DataFrame:
-    if not keywords:
-        empty = df.copy()
-        empty["matched_keywords"] = [[] for _ in range(len(empty))]
-        empty["has_match"] = False
-        return empty
-
-    def extract_hits(title: str) -> List[str]:
-        text = str(title)
-        return [kw for kw in keywords if kw in text]
-
-    annotated = df.copy()
-    annotated["matched_keywords"] = annotated["title"].apply(extract_hits)
-    annotated["has_match"] = annotated["matched_keywords"].apply(bool)
-    return annotated
-
-
-def build_rankings(annotated_df: pd.DataFrame) -> List[dict]:
-    rankings: List[dict] = []
-    for company, subset in annotated_df.groupby("organization"):
-        total = len(subset)
-        if total == 0:
-            continue
-
-        matched_rows = subset[subset["has_match"]]
-        matched_count = len(matched_rows)
-        if matched_count == 0:
-            continue
-
-        match_score = round((matched_count / total) * 100)
-        matched_keywords = sorted(
-            {kw for kw_list in matched_rows["matched_keywords"] for kw in kw_list}
-        )
-
-        rankings.append(
-            {
-                "company": company,
-                "match_score": match_score,
-                "matched_presentations": matched_count,
-                "total_presentations": total,
-                "matched_keywords": matched_keywords,
-            }
-        )
-
-    rankings.sort(key=lambda r: (-r["match_score"], -r["matched_presentations"], r["company"]))
-    return rankings
-
-
-def rename_and_validate(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Normalize the CSV columns to the names used in the app.
-    Expected input columns (from Manus export):
-    - conference_name, title, author_name, organization_name
-    """
-    column_map = {
-        "conference_name": "conference",
-        "title": "title",
-        "author_name": "author",
-        "organization_name": "organization",
+# --- Custom CSS for "Instagram DM-like" and modern feel ---
+st.markdown("""
+<style>
+    .main {
+        background-color: #f8f9fa;
     }
-    missing = [src for src in column_map if src not in df.columns]
-    if missing:
-        raise ValueError(f"CSV に必要なカラムが見つかりません: {missing}")
-    renamed = df.rename(columns=column_map)
-    return renamed[["conference", "title", "author", "organization"]]
+    h1 {
+        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        color: #333;
+        font-weight: 700;
+        text-align: center;
+        margin-bottom: 30px;
+    }
+    /* Fix text color in selectbox - targeting the value container and input */
+    .stSelectbox div[data-baseweb="select"] {
+        background-color: white !important;
+        border-radius: 20px !important;
+        color: #333 !important;
+    }
+    .stSelectbox div[data-baseweb="select"] span {
+        color: #333 !important;
+    }
+    /* Ensure dropdown options are also visible */
+    ul[data-baseweb="menu"] {
+        background-color: white !important;
+    }
+    li[data-baseweb="option"] {
+        color: #333 !important;
+    }
+    li[data-baseweb="option"]:hover {
+        background-color: #f0f0f0 !important;
+    }
+    /* Metric styling */
+    .metric-label {
+        color: #777;
+        font-size: 0.9em;
+    }
+    .metric-value {
+        color: #333;
+        font-size: 2em;
+        font-weight: bold;
+    }
+</style>
+""", unsafe_allow_html=True)
 
+# --- Header ---
+st.title("ConfTrack")
+st.markdown("<p style='text-align: center; color: #666;'>博士就活生のための学会トレンド分析</p>", unsafe_allow_html=True)
 
-def load_from_local(path: Path) -> pd.DataFrame:
-    if not path.exists():
-        raise FileNotFoundError(f"ローカル CSV が見つかりません: {path}")
-    df = pd.read_csv(path)
-    return rename_and_validate(df)
+# --- Data Loading & Preprocessing ---
+@st.cache_data
+def load_and_process_data(filepath):
+    df = pd.read_csv(filepath)
+    
+    # Fill NaN
+    cols = ['所属1', '所属2', '所属3', '所属4']
+    df[cols] = df[cols].fillna('')
+    
+    # Academia Keywords for Exclusion (Expanded for better accuracy)
+    academia_keywords = [
+        '大学', 'University', 'College', 'Institute of Technology', '高専', '高等専門学校', 'School', 'Academy', 'Polytechnic',
+        '研究所', '研究センター', '機構', 'Institute', 'Laboratory', 'Center', 'CNRS', 'INRIA', 'UCLA', 'MIT', '振興会'
+    ]
+    
+    def is_academia(affiliation):
+        if not affiliation: return False
+        return any(keyword in str(affiliation) for keyword in academia_keywords)
 
+    def is_company(affiliation):
+        if not affiliation: return False
+        # If it's not academia, we treat it as a potential company for this MVP
+        return not is_academia(affiliation)
 
-def load_from_gcs(bucket: str, blob_name: str) -> pd.DataFrame:
-    try:
-        from google.cloud import storage  # type: ignore
-    except Exception as e:
-        raise RuntimeError(
-            "google-cloud-storage がインストールされていません。`pip install google-cloud-storage` を実行してください。"
-        ) from e
+    # Extract all companies involved in each paper
+    # And determine if it's a collaboration
+    
+    processed_rows = []
+    
+    for idx, row in df.iterrows():
+        affiliations = [row[c] for c in cols if row[c]]
+        
+        has_academia = any(is_academia(aff) for aff in affiliations)
+        companies_in_paper = [aff for aff in affiliations if is_company(aff)]
+        
+        # Normalize company names (simple trimming for now)
+        companies_in_paper = list(set([c.strip() for c in companies_in_paper]))
+        
+        if not companies_in_paper:
+            continue # Skip if no company involved (Pure Academia)
+            
+        is_collaboration = has_academia
+        
+        for company in companies_in_paper:
+            # Partners logic: All affiliations excluding the current company
+            partners = [a for a in affiliations if a != company]
+            partners_str = ", ".join(partners) if partners else "-"
 
-    client = storage.Client()
-    bucket_obj = client.bucket(bucket)
-    blob = bucket_obj.blob(blob_name)
-    if not blob.exists():
-        raise FileNotFoundError(f"GCS オブジェクトが見つかりません: gs://{bucket}/{blob_name}")
-    data_bytes = blob.download_as_bytes()
-    df = pd.read_csv(BytesIO(data_bytes))
-    return rename_and_validate(df)
+            processed_rows.append({
+                'Original_Index': idx,
+                'Company': company,
+                'Year': row['年度'],
+                'Title': row['タイトル'],
+                'Is_Collaboration': is_collaboration,
+                'Conf_Name': row.get('学会名', 'Unknown'),
+                'Partners': partners_str
+            })
+            
+    return pd.DataFrame(processed_rows)
 
+try:
+    # Use absolute path relative to this script file to ensure it works on Cloud Run
+    data_path = os.path.join(os.path.dirname(__file__), 'database', 'jsiam.csv')
+    df_processed = load_and_process_data(data_path)
+except Exception as e:
+    st.error(f"データの読み込みに失敗しました: {e}")
+    st.stop()
 
-@st.cache_data(show_spinner=False)
-def load_presentations(use_gcs: bool) -> pd.DataFrame:
-    if use_gcs:
-        if not GCS_BUCKET:
-            raise RuntimeError("GCS_BUCKET が設定されていません。")
-        return load_from_gcs(GCS_BUCKET, GCS_BLOB)
-    return load_from_local(LOCAL_CSV_PATH)
+# --- Search Area ---
+company_list = sorted(df_processed['Company'].unique())
 
-
-def main() -> None:
-    st.set_page_config(page_title="Conference Tracker", layout="wide")
-    st.title("Conference Tracker")
-    st.caption("研究キーワードから企業のマッチ度を計算するツール")
-
-    st.sidebar.header("データソース")
-    st.sidebar.write(f"ローカル: `{LOCAL_CSV_PATH.name}`")
-    st.sidebar.write(f"GCS 使用: {'ON' if USE_GCS else 'OFF'}")
-    if USE_GCS:
-        st.sidebar.write(f"バケット: `{GCS_BUCKET}`")
-        st.sidebar.write(f"オブジェクト: `{GCS_BLOB}`")
-        if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
-            st.sidebar.warning("GOOGLE_APPLICATION_CREDENTIALS が設定されていません。")
-
-    try:
-        presentations = load_presentations(USE_GCS)
-    except Exception as e:
-        st.error(f"データの読み込みに失敗しました: {e}")
-        return
-
-    with st.expander("使い方", expanded=True):
-        st.markdown(
-            """
-            1. 研究キーワードを入力（スペース・カンマ区切り可）  
-            2. 「マッチ度を計算」を押すと、企業ごとのマッチ度ランキングを表示  
-            3. ランキングから企業を選ぶと、学会別の発表一覧を確認できます
-            """
-        )
-
-    keyword_input = st.text_input(
-        "研究キーワード",
-        placeholder="例：生体情報, 機械学習, 医用画像",
+col1, col2, col3 = st.columns([1, 2, 1])
+with col2:
+    search_query = st.text_input(
+        "企業名を検索...",
+        placeholder="例: NTT (該当する企業が自動でリストアップされます)",
     )
-    compute_button = st.button("マッチ度を計算", type="primary")
+    
+    # Tabs (Visual only for MVP as per design)
+    tab_selection = st.radio("Search Mode", ["企業", "学会"], index=0, horizontal=True, label_visibility="collapsed")
+    if tab_selection == "学会":
+        st.info("現在、日本応用数理学会(JSIAM)のデータのみを表示しています。")
 
-    keywords = normalize_keywords(keyword_input)
-    if compute_button and not keywords:
-        st.warning("2文字以上のキーワードを入力してください。")
+# Search Logic & Result List UI
+selected_companies = []
 
-    if not keywords:
-        st.info("キーワードを入力すると、マッチ度ランキングが表示されます。")
-        return
+if search_query:
+    # 1. Find all partial matches
+    matches = [c for c in company_list if search_query.lower() in c.lower()]
+    
+    # 2. Session State for Exclusions
+    if 'excluded_companies' not in st.session_state:
+        st.session_state.excluded_companies = set()
+        
+    # Reset exclusion if search query changes significantly? 
+    # For now, we keep the exclusion list global or per session. 
+    # To be user-friendly, maybe we provide a "Reset Filter" button.
+    
+    # 3. Filter out excluded ones
+    active_matches = [m for m in matches if m not in st.session_state.excluded_companies]
+    
+    # 4. Display Logic (Right side / Below search)
+    st.write(f"検索結果: {len(active_matches)}件 ヒット")
+    
+    # Limit display
+    max_display = 10
+    if 'show_all_results' not in st.session_state:
+        st.session_state.show_all_results = False
+        
+    display_list = active_matches
+    if not st.session_state.show_all_results:
+        display_list = active_matches[:max_display]
+        
+    # Display Chips/Rows with 'x' button
+    if active_matches:
+        st.markdown("##### 対象企業リスト (xボタンで除外)")
+        
+        # Use a container for the list
+        with st.container(border=True):
+            for company in display_list:
+                c1, c2 = st.columns([8, 1])
+                with c1:
+                    st.text(company)
+                with c2:
+                    if st.button("✕", key=f"btn_ex_{company}", help=f"{company}を集計から除外"):
+                        st.session_state.excluded_companies.add(company)
+                        st.rerun()
+            
+            # Show More Button
+            if len(active_matches) > max_display and not st.session_state.show_all_results:
+                if st.button(f"全{len(active_matches)}件を表示"):
+                    st.session_state.show_all_results = True
+                    st.rerun()
 
-    annotated = annotate_matches(presentations, keywords)
-    rankings = build_rankings(annotated)
+    # Reset Button (Recover excluded items)
+    if st.session_state.excluded_companies:
+        if st.button("除外フィルターをリセット"):
+            st.session_state.excluded_companies = set()
+            st.rerun()
 
-    st.subheader("マッチ度ランキング")
-    if not rankings:
-        st.write("該当する企業は見つかりませんでした。")
-        return
+    selected_companies = active_matches
 
-    ranking_df = pd.DataFrame(
-        [
-            {
-                "企業": r["company"],
-                "マッチ度(%)": r["match_score"],
-                "一致発表数": r["matched_presentations"],
-                "総発表数": r["total_presentations"],
-                "マッチしたキーワード": " / ".join(r["matched_keywords"]),
-            }
-            for r in rankings
-        ]
+# --- Dashboard Area ---
+if selected_companies:
+    # Filter data
+    company_data = df_processed[df_processed['Company'].isin(selected_companies)]
+    
+    # Display names (truncate if too many)
+    display_name = ", ".join(selected_companies)
+    if len(selected_companies) > 3:
+        display_name = f"{selected_companies[0]} 他{len(selected_companies)-1}件"
+        
+    st.markdown(f"### 🔍 分析結果: {display_name}")
+    
+    # Layout: 3 Columns
+    viz_col1, viz_col2, viz_col3 = st.columns(3)
+    
+    # --- 1. Trend Chart (Bar) ---
+    with viz_col1:
+        with st.container(border=True):
+            st.subheader("発表件数の推移")
+            
+            trend_data = company_data.groupby('Year').size().reset_index(name='Count')
+            
+            fig_trend = px.bar(
+                trend_data, x='Year', y='Count',
+                text='Count',
+                color_discrete_sequence=['#5D9CEC']
+            )
+            fig_trend.update_layout(
+                xaxis_title="年度",
+                yaxis_title="件数",
+                plot_bgcolor='white',
+                margin=dict(l=20, r=20, t=30, b=20),
+                height=300
+            )
+            # Make x-axis discrete (integers)
+            fig_trend.update_xaxes(type='category')
+            
+            st.plotly_chart(fig_trend, use_container_width=True)
+
+    # --- 2. Collaboration Ratio (Donut) ---
+    with viz_col2:
+        with st.container(border=True):
+            st.subheader("産学連携比率")
+            
+            collab_counts = company_data['Is_Collaboration'].value_counts()
+            # Map boolean to string
+            labels = {True: '共同 (産学連携)', False: '単独 (企業のみ)'}
+            collab_df = pd.DataFrame({
+                'Type': [labels.get(x, str(x)) for x in collab_counts.index],
+                'Count': collab_counts.values
+            })
+            
+            total_count = collab_df['Count'].sum()
+            
+            fig_donut = px.pie(
+                collab_df, values='Count', names='Type',
+                hole=0.6,
+                color_discrete_sequence=['#5D9CEC', '#ACD1F9']
+            )
+            fig_donut.update_layout(
+                annotations=[dict(text=f'総計<br>{total_count}件', x=0.5, y=0.5, font_size=20, showarrow=False)],
+                showlegend=True,
+                legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
+                margin=dict(l=20, r=20, t=30, b=50),
+                height=300
+            )
+            st.plotly_chart(fig_donut, use_container_width=True)
+
+    # --- 3. Word Cloud ---
+    with viz_col3:
+        with st.container(border=True):
+            st.subheader("頻出キーワード")
+            
+            text_content = " ".join(company_data['Title'].dropna().astype(str))
+            
+            # Tokenize using Janome
+            t = Tokenizer()
+            tokens = t.tokenize(text_content)
+            words = []
+            for token in tokens:
+                part_of_speech = token.part_of_speech.split(',')[0]
+                if part_of_speech in ['名詞']:
+                    # Exclude common stop words (stopwords setting is simple here)
+                    if token.surface not in ['の', 'こと', '研究', '解析', 'データ', '手法', '検討', '開発', '提案', '利用', '評価', '構築', 'モデル', 'シミュレーション', '応用', '計算']: 
+                        words.append(token.surface)
+            
+            text_space_separated = " ".join(words)
+            
+            if text_space_separated.strip():
+                # Generate WordCloud
+                # note: font_path might need regular font if Hiragino is not available in container, but usually ok on local Mac
+                wc = WordCloud(
+                    background_color="white",
+                    width=400,
+                    height=300,
+                    font_path='/System/Library/Fonts/Hiragino Sans GB.ttc', # Mac font
+                    # colormap='Blues'
+                ).generate(text_space_separated)
+                
+                # Use st.image to display directly, avoiding matplotlib conflicts
+                st.image(wc.to_image(), use_column_width=True)
+            else:
+                st.info("キーワードを抽出できませんでした。")
+
+    # --- 4. Data Table ---
+    st.subheader("発表リストと共同研究パートナー")
+    st.markdown("選択された企業の発表一覧です。「Partners」列には、共同研究先の機関（企業名を除いた所属）が表示されます。")
+    
+    # Sort by Year Descending
+    display_df = company_data[['Year', 'Title', 'Company', 'Partners', 'Is_Collaboration', 'Conf_Name']].sort_values(by='Year', ascending=False)
+    
+    st.dataframe(
+        display_df,
+        column_config={
+            "Year": st.column_config.NumberColumn("年度", format="%d"),
+            "Title": "タイトル",
+            "Company": "対象企業",
+            "Partners": "共同研究パートナー (他所属)",
+            "Is_Collaboration": "産学連携",
+            "Conf_Name": "学会"
+        },
+        use_container_width=True,
+        hide_index=True
     )
-    st.dataframe(ranking_df, use_container_width=True)
 
-    st.subheader("企業別の発表詳細")
-    company_names = [r["company"] for r in rankings]
-    selected_company = st.selectbox("企業を選択", company_names)
+else:
+    # Empty State / Landing
+    st.markdown("""
+    <div style="text-align: center; margin-top: 50px; color: #888;">
+        <h3>👈 企業を選択して分析を開始してください</h3>
+        <p>例: NTT, 日立製作所, 豊田中央研究所 など（複数選択可）</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-    company_records = annotated[annotated["organization"] == selected_company]
-    matched_records = company_records[company_records["has_match"]]
-
-    col1, col2, col3 = st.columns(3)
-    col1.metric("総発表数", len(company_records))
-    col2.metric("マッチした発表数", len(matched_records))
-    match_ratio = 0
-    if len(company_records) > 0:
-        match_ratio = round((len(matched_records) / len(company_records)) * 100)
-    col3.metric("マッチ度", f"{match_ratio}%")
-
-    tab_match, tab_all = st.tabs(["マッチした発表", "全ての発表"])
-
-    with tab_match:
-        if matched_records.empty:
-            st.write("この企業のマッチする発表はありません。")
-        else:
-            st.markdown("**マッチしたキーワード**")
-            keywords_text = sorted(
-                {kw for row in matched_records["matched_keywords"] for kw in row}
-            )
-            st.write(" / ".join(keywords_text) or "―")
-            st.write("**発表一覧**")
-            st.dataframe(
-                matched_records[["conference", "title", "author"]]
-                .rename(
-                    columns={
-                        "conference": "学会",
-                        "title": "発表タイトル",
-                        "author": "発表者",
-                    }
-                ),
-                use_container_width=True,
-            )
-
-    with tab_all:
-        st.dataframe(
-            company_records[["conference", "title", "author", "has_match"]]
-            .rename(
-                columns={
-                    "conference": "学会",
-                    "title": "発表タイトル",
-                    "author": "発表者",
-                    "has_match": "キーワード一致",
-                }
-            )
-            .assign(キーワード一致=lambda df: df["キーワード一致"].map({True: "◎", False: "―"})),
-            use_container_width=True,
-        )
-
-
-if __name__ == "__main__":
-    main()
+# --- Footer ---
+st.markdown("---")
+st.markdown("<p style='text-align: center; font-size: 0.8em;'>© 2025 ConfTrack | JSIAM Edition</p>", unsafe_allow_html=True)
