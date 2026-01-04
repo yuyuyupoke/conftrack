@@ -13,7 +13,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY app.py presentations.csv ./
+COPY app.py .
+COPY database/ ./database/
 
 # Streamlit listens on 8501 by default; Cloud Run provides PORT
 ENV PORT=8080
