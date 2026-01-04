@@ -6,6 +6,7 @@ WORKDIR /app
 
 # Install system dependencies (if any needed later, add here)
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy dependency list and install

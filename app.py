@@ -297,11 +297,17 @@ if selected_companies:
             if text_space_separated.strip():
                 # Generate WordCloud
                 # note: font_path might need regular font if Hiragino is not available in container, but usually ok on local Mac
+                # Font Selection Logic
+                font_path = '/System/Library/Fonts/Hiragino Sans GB.ttc' # Mac Default
+                if not os.path.exists(font_path):
+                    # Linux / Cloud Run (fonts-noto-cjk)
+                    font_path = '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'
+                
                 wc = WordCloud(
                     background_color="white",
                     width=400,
                     height=300,
-                    font_path='/System/Library/Fonts/Hiragino Sans GB.ttc', # Mac font
+                    font_path=font_path,
                     # colormap='Blues'
                 ).generate(text_space_separated)
                 
